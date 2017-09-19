@@ -88,6 +88,9 @@ void accept_request(int client)
   i++; j++;
  }
  url[i] = '\0';
+	printf("B: %s\n", buf);
+	printf("M: %s\n", method);
+	printf("U: %s\n", url);
 
  if (strcasecmp(method, "GET") == 0)
  {
@@ -120,8 +123,10 @@ void accept_request(int client)
    cgi = 1;
   if (!cgi)
    serve_file(client, path);
+  /*
   else
    execute_cgi(client, path, method, query_string);
+   */
  }
 
  close(client);
@@ -167,24 +172,6 @@ void cat(int client, FILE *resource)
 }
 
 /**********************************************************************/
-/* Inform the client that a CGI script could not be executed.
- * Parameter: the client socket descriptor. */
-/**********************************************************************/
-void cannot_execute(int client)
-{
- char buf[1024];
-
- sprintf(buf, "HTTP/1.0 500 Internal Server Error\r\n");
- send(client, buf, strlen(buf), 0);
- sprintf(buf, "Content-type: text/html\r\n");
- send(client, buf, strlen(buf), 0);
- sprintf(buf, "\r\n");
- send(client, buf, strlen(buf), 0);
- sprintf(buf, "<P>Error prohibited CGI execution.\r\n");
- send(client, buf, strlen(buf), 0);
-}
-
-/**********************************************************************/
 /* Print out an error message with perror() (for system errors; based
  * on value of errno, which indicates system call errors) and exit the
  * program indicating an error. */
@@ -193,100 +180,6 @@ void error_die(const char *sc)
 {
  perror(sc);
  exit(1);
-}
-
-/**********************************************************************/
-/* Execute a CGI script.  Will need to set environment variables as
- * appropriate.
- * Parameters: client socket descriptor
- *             path to the CGI script */
-/**********************************************************************/
-void execute_cgi(int client, const char *path,
-                 const char *method, const char *query_string)
-{
- char buf[1024];
- int cgi_output[2];
- int cgi_input[2];
- pid_t pid;
- int status;
- int i;
- char c;
- int numchars = 1;
- int content_length = -1;
-
- buf[0] = 'A'; buf[1] = '\0';
- if (strcasecmp(method, "GET") == 0)
-  while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
-   numchars = get_line(client, buf, sizeof(buf));
- else    /* POST */
- {
-  numchars = get_line(client, buf, sizeof(buf));
-  while ((numchars > 0) && strcmp("\n", buf))
-  {
-   buf[15] = '\0';
-   if (strcasecmp(buf, "Content-Length:") == 0)
-    content_length = atoi(&(buf[16]));
-   numchars = get_line(client, buf, sizeof(buf));
-  }
-  if (content_length == -1) {
-   bad_request(client);
-   return;
-  }
- }
-
- sprintf(buf, "HTTP/1.0 200 OK\r\n");
- send(client, buf, strlen(buf), 0);
-
- if (pipe(cgi_output) < 0) {
-  cannot_execute(client);
-  return;
- }
- if (pipe(cgi_input) < 0) {
-  cannot_execute(client);
-  return;
- }
-
- if ( (pid = fork()) < 0 ) {
-  cannot_execute(client);
-  return;
- }
- if (pid == 0)  /* child: CGI script */
- {
-  char meth_env[255];
-  char query_env[255];
-  char length_env[255];
-
-  dup2(cgi_output[1], 1);
-  dup2(cgi_input[0], 0);
-  close(cgi_output[0]);
-  close(cgi_input[1]);
-  sprintf(meth_env, "REQUEST_METHOD=%s", method);
-  putenv(meth_env);
-  if (strcasecmp(method, "GET") == 0) {
-   sprintf(query_env, "QUERY_STRING=%s", query_string);
-   putenv(query_env);
-  }
-  else {   /* POST */
-   sprintf(length_env, "CONTENT_LENGTH=%d", content_length);
-   putenv(length_env);
-  }
-  execl(path, path, NULL);
-  exit(0);
- } else {    /* parent */
-  close(cgi_output[1]);
-  close(cgi_input[0]);
-  if (strcasecmp(method, "POST") == 0)
-   for (i = 0; i < content_length; i++) {
-    recv(client, &c, 1, 0);
-    write(cgi_input[1], &c, 1);
-   }
-  while (read(cgi_output[0], &c, 1) > 0)
-   send(client, &c, 1, 0);
-
-  close(cgi_output[0]);
-  close(cgi_input[1]);
-  waitpid(pid, &status, 0);
- }
 }
 
 /**********************************************************************/
@@ -491,7 +384,7 @@ int main(void)
                        &client_name_len);
   if (client_sock == -1)
    error_die("accept");
- /* accept_request(client_sock); */
+ accept_request(client_sock);
  if (pthread_create(&newthread , NULL, accept_request, client_sock) != 0)
    perror("pthread_create");
  }

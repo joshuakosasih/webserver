@@ -40,31 +40,7 @@ int get_line(int sock, char *buf, int size) {
 	 return(i);
 }
 
-int main() {
-	int server_sock = -1;
-	int client_sock = -1;
-	int port = 12345;
-	
-	struct sockaddr_in client_name, name;
-	unsigned int client_name_len = sizeof(client_name);
-	
-	server_sock = socket(PF_INET, SOCK_STREAM, 0);
-	memset(&name, 0, sizeof(name));
-	name.sin_family = AF_INET;
-	name.sin_port = htons(port);
-	name.sin_addr.s_addr = htonl(INADDR_ANY);
-	
-	bind(server_sock, (struct sockaddr *)&name, sizeof(name));	
-	listen(server_sock, 5);
-	printf("httpd running on port %d\n", port);
-	
-	client_sock = accept(server_sock, (struct sockaddr *)&client_name, &client_name_len);
-	
-	if (client_sock == -1)
-		printf("accept error");
-	else
-		printf("accepted");
-		
+void server_accept(int client_sock) {
 	//read message
 	char buf[1024];
 	char method[255];
@@ -73,7 +49,7 @@ int main() {
 	get_line(client_sock, buf, sizeof(buf));
 	printf("%s", buf);
 	
-	
+	//get method
 	int i = 0, j = 0;
 	while (!ISspace(buf[j]) && (i < sizeof(method) - 1)) {
 		method[i] = buf[j];
@@ -84,6 +60,7 @@ int main() {
 	i = 0;
 	while (ISspace(buf[j]) && (j < sizeof(buf)))
 		j++;
+	//get url
 	while (!ISspace(buf[j]) && (i < sizeof(url) - 1) && (j < sizeof(buf))) {
 		url[i] = buf[j];
 		i++; j++;
@@ -104,26 +81,83 @@ int main() {
 	char filebuf[1024];
 	char outbuf[1024];
 	filebuf[0] = 'A'; filebuf[1] = '\0';
-	while ((numchars > 0) && strcmp("\n", filebuf))  /* read & discard headers */
+	while ((numchars > 0) && strcmp("\n", filebuf))
 		numchars = get_line(client_sock, filebuf, sizeof(filebuf));
 	
 	resource = fopen(path, "r");
-	
-	strcpy(buf, "HTTP/1.0 200 OK\r\n");
-	send(client_sock, outbuf, strlen(outbuf), 0);
-	strcpy(outbuf, "JHTTPWebServer\r\n");
-	send(client_sock, outbuf, strlen(outbuf), 0);
-	sprintf(outbuf, "Content-Type: text/html\r\n");
-	send(client_sock, outbuf, strlen(outbuf), 0);
-	strcpy(outbuf, "\r\n");
-	send(client_sock, outbuf, strlen(outbuf), 0);
-	fgets(outbuf, sizeof(outbuf), resource);
-	while (!feof(resource)) {
+	if (resource == NULL) {
+		printf("file not found\n");
+		strcpy(buf, "HTTP/1.0 404 NOT FOUND\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		printf("404 sent\n");
+		strcpy(outbuf, "JHTTPWebServer\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		sprintf(outbuf, "Content-Type: text/html\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		strcpy(outbuf, "\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		sprintf(buf, "<HTML><TITLE>Not Found</TITLE>\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		sprintf(buf, "<BODY><h1>404 - File Not Found\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		sprintf(buf, "</h1></BODY></HTML>\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		printf("html sent\n");
+	}
+	else {
+		printf("serving..\n");
+		strcpy(buf, "HTTP/1.0 200 OK\r\n");		
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		strcpy(outbuf, "JHTTPWebServer\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		sprintf(outbuf, "Content-Type: text/html\r\n");
+		send(client_sock, outbuf, strlen(outbuf), 0);
+		strcpy(outbuf, "\r\n");
 		send(client_sock, outbuf, strlen(outbuf), 0);
 		fgets(outbuf, sizeof(outbuf), resource);
+		while (!feof(resource)) {
+			send(client_sock, outbuf, strlen(outbuf), 0);
+			fgets(outbuf, sizeof(outbuf), resource);
+		}
+		fclose(resource);
+		printf("html sent\n");
 	}
-	fclose(resource);
+	close(client_sock);
+	printf("closed\n");
+}
+
+int main() {
+	int server_sock = -1;
+	int client_sock = -1;
+	int port = 23456;
 	
+	struct sockaddr_in client_name, name;
+	unsigned int client_name_len = sizeof(client_name);
+	
+	pthread_t newthread;
+	
+	server_sock = socket(PF_INET, SOCK_STREAM, 0);
+	memset(&name, 0, sizeof(name));
+	name.sin_family = AF_INET;
+	name.sin_port = htons(port);
+	name.sin_addr.s_addr = htonl(INADDR_ANY);
+	
+	bind(server_sock, (struct sockaddr *)&name, sizeof(name));	
+	listen(server_sock, 5);
+	printf("http running on port %d\n", port);
+	
+	while(1) {
+		
+		client_sock = accept(server_sock, (struct sockaddr *)&client_name, &client_name_len);
+		
+		if (client_sock == -1)
+			printf("accept error\n");
+		else
+			printf("client accepted\n");
+		
+		pthread_create(&newthread , NULL, server_accept, client_sock);		
+	}
 	close(server_sock);
+	
 	return 0;
 }
